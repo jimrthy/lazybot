@@ -3,6 +3,7 @@
         [clj-time.core :only [now from-time-zone time-zone-for-offset]]
         [clj-time.format :only [unparse formatters]]
         [clojure.java.io :only [file]]
+        [clojure.pprint :refer [pprint]]
         [clojure.string :only [join]]
         [compojure.core :only [routes]]
         [hiccup.page :only [html5]])
@@ -41,8 +42,12 @@
   ([server channel] (log-dir (config) server channel))
   ([config server channel]
      (let [short-channel (apply str (remove #(= % \#) channel))]
-       (when (get-in config [server :log channel])
-         (file (:log-dir (config server)) server short-channel)))))
+       (if-let [directory-name (get-in config [server :log channel])]
+         (do 
+             (println "Log directory: " directory-name)
+             (file (:log-dir (config server)) server short-channel))
+         (do (println "Logging not configured for " short-channel " on " server ". Configured channels:")
+             (pprint (:log (config server))))))))
 
 (defn log-files
   "A list of log files for a server and channel."
@@ -58,18 +63,27 @@
     [(unparse (formatters :date) time)
      (unparse (formatters :hour-minute-second) time)]))
 
-(defn log-message [{:keys [com bot nick channel message action?]}]
+;; FIXME: This should be reconfigured as database logger
+(defn log-message [{:keys [com bot nick channel message action?] :as args}]
   (let [config (:config @bot)
         server (:server @com)]
-    (when-let [log-dir (log-dir config server channel)]
-      (let [[date time] (date-time config)
-            log-file (file log-dir (str date ".txt"))]
-        (.mkdirs log-dir)
-        (spit log-file
-              (if action?
-                (format "[%s] *%s %s\n" time nick message)
-                (format "[%s] %s: %s\n" time nick message))
-              :append true)))))
+    (comment (do (println "\nConfiguration:")
+                 (pprint config)
+                 (println "\nServer/channel:")
+                 (pprint [server channel])))
+    (if-let [log-dir (log-dir config server channel)]
+      (do
+        (println "Logging directory: " log-dir)
+        (let [[date time] (date-time config)
+              log-file (file log-dir (str date ".txt"))]
+          (.mkdirs log-dir)
+          (spit log-file
+                (if action?
+                  (format "[%s] *%s %s\n" time nick message)
+                  (format "[%s] %s: %s\n" time nick message))
+                :append true)))
+      (do (print "Logging not configured for ")
+          (pprint [server channel])))))
 
 (defn link
   "Link to a logger URI."
@@ -137,6 +151,20 @@
 (def pathreg #"[^\/]+")
 
 (defplugin
+  (:cmd 
+   "Logging Configuration"
+   #{"showlogging"}
+   (fn [{:keys [args] :as com-m}]
+     ;; There's *lots* of stuff in com-m.
+     (comment (println "Args: " args "\n\nFull message:\n" com-m))
+     (comment (print "Args: " args "\n\nMessage keys:\n"))
+     (comment (pprint (keys com-m)))
+     (println "\nBot:")
+     (pprint (:bot com-m))
+     (println "\nCOM:")
+     (pprint (:com com-m))
+     (comment (println "Channel:\n"))
+     (comment (pprint (:channel com-m)))))
   (:routes (routes
              (GET "/logger" req (index req))
              (GET ["/logger/:server" :server pathreg] [server]
