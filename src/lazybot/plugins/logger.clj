@@ -8,8 +8,10 @@
         [compojure.core :only [routes]]
         [hiccup.page :only [html5]])
   (:require [compojure.core :refer [GET]]
-            [clj-http.util])
-  (:import [java.io File]))
+            [clj-http.util]
+            [somnium.congomongo :refer [insert!]])
+  (:import [java.io File]
+           [java.util Date]))
 
 (defn config
   "Returns the current config."
@@ -37,17 +39,30 @@
   ([config server]
      (get-in config [server :log])))
 
+(defn channel-log-destination
+  "Is this channel configured to do logging?
+Under the key with the name of the server as a key, there's a :log key.
+That's either a set or a map.
+The keys in either represent which channels should be logged.
+The values indicate where the log should go to:
+If the value is the same as the key, it goes to a text file.
+Otherwise, it should go to the database."
+  [config server channel]
+  (get-in config [server :log channel]))
+
+(defn shorten
+  "Get rid of special symbols that cause issues with shells and such"
+  [channel]
+  (apply str (remove #(= % \#) channel)))
+
 (defn log-dir
-  "The log directory for a particular server and channel, if one exists."
+  "The log directory for a particular server and channel, if one exists.
+Set up under config, under the :log-dir keyin the key spec'd by the 
+server name."
   ([server channel] (log-dir (config) server channel))
   ([config server channel]
-     (let [short-channel (apply str (remove #(= % \#) channel))]
-       (if-let [directory-name (get-in config [server :log channel])]
-         (do 
-             (println "Log directory: " directory-name)
-             (file (:log-dir (config server)) server short-channel))
-         (do (println "Logging not configured for " short-channel " on " server ". Configured channels:")
-             (pprint (:log (config server))))))))
+     (let [short-channel (shorten channel)]
+    (file (:log-dir (config server)) server short-channel))))
 
 (defn log-files
   "A list of log files for a server and channel."
@@ -63,27 +78,46 @@
     [(unparse (formatters :date) time)
      (unparse (formatters :hour-minute-second) time)]))
 
-;; FIXME: This should be reconfigured as database logger
 (defn log-message [{:keys [com bot nick channel message action?] :as args}]
   (let [config (:config @bot)
         server (:server @com)]
-    (comment (do (println "\nConfiguration:")
-                 (pprint config)
-                 (println "\nServer/channel:")
-                 (pprint [server channel])))
-    (if-let [log-dir (log-dir config server channel)]
-      (do
-        (println "Logging directory: " log-dir)
-        (let [[date time] (date-time config)
-              log-file (file log-dir (str date ".txt"))]
-          (.mkdirs log-dir)
-          (spit log-file
-                (if action?
-                  (format "[%s] *%s %s\n" time nick message)
-                  (format "[%s] %s: %s\n" time nick message))
-                :append true)))
-      (do (print "Logging not configured for ")
-          (pprint [server channel])))))
+    (when-let [dst (channel-log-destination config server channel)]
+      (let [[date time] (date-time config)
+            log-message (if action?
+                          (format "[%s] *%s %s\n" time nick message)
+                          (format "[%s] %s: %s\n" time nick message))]
+        (if (= dst channel)
+          (if-let [log-dir (log-dir config server channel)]
+            (do
+              (comment (println "Logging directory: " log-dir))
+              (let [log-file (file log-dir (str date ".txt"))]
+                (.mkdirs log-dir)
+                (spit log-file
+                      log-message
+                      :append true)))
+            (do (print "File Logging not configured for ")
+                (pprint [server channel])))
+          (do
+            ;; Mongo has issues with this naming convention.
+            ;; Then again, it seems likely that we'll have collisions with
+            ;; pretty much any convention I pick.
+            ;; This seems to be 'almost' good enough for now.
+            ;; Can get to the collection using e.g.
+            ;; db.getCollection("log-irc.freenode.net-austin-clojure").find()
+            (comment) 
+            (let [current (now)
+                  java-date (Date. (.getMillis current))
+                  collection-name (str "log-" server "-" (shorten channel))]
+              ;; For now, ignore :bot, :com, :channel
+              (insert! (keyword collection-name) {:nick (:nick args)
+                                                  :raw-message (:raw-message args)
+                                                  :hmask (:hmask args)
+                                                  :message (:message args)
+                                                  :user (:user args)
+                                                  :doing (:doing args)
+                                                  :ident (:ident args)
+                                                  ;; Can't serialize a DateTime.
+                                                  :timestamp java-date}))))))))
 
 (defn link
   "Link to a logger URI."

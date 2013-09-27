@@ -1,6 +1,6 @@
 (ns lazybot.core
   (:use [lazybot registry info]
-        [clojure.stacktrace :only [root-cause]]
+        [clojure.stacktrace :only [root-cause print-stack-trace]]
         [somnium.congomongo :only [mongo!]]
         [clojure.set :only [intersection]]
         [compojure.core :only [routes]]
@@ -34,7 +34,9 @@
         (doseq [hook (pull-hooks bot hook-key)]
           (hook ircm))
         (catch Throwable ex
-          (println "Call hook for " ircm " failed:\n\n" ex))))
+          (println "Call hook for " ircm " failed:\n\n" ex)
+          (print-stack-trace ex)
+          (println "Root Cause:\n" (root-cause ex)))))
     (catch Throwable ex
       (println "Ignoring " ircm "\nfailed!\nError:\n" ex))))
 
