@@ -28,9 +28,15 @@
 (defn call-all
   "Call all hooks of a specific type."
   [{bot :bot :as ircm} hook-key]
-  (when-not (ignore-message? ircm)
-    (doseq [hook (pull-hooks bot hook-key)]
-      (hook ircm))))
+  (try
+    (when-not (ignore-message? ircm)
+      (try
+        (doseq [hook (pull-hooks bot hook-key)]
+          (hook ircm))
+        (catch Throwable ex
+          (println "Call hook for " ircm " failed:\n\n" ex))))
+    (catch Throwable ex
+      (println "Ignoring " ircm "\nfailed!\nError:\n" ex))))
 
 ;; Note that even the actual handling of commands is done via a hook.
 (def initial-hooks
