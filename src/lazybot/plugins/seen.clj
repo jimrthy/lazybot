@@ -22,9 +22,10 @@
 (defn get-seen
   "Gets the last-seen for a nick."
   [nick server]
-  (when-let [seen-map (fetch-one :seen :where {:nick (.toLowerCase nick)
-                                               :server server})]
-    (update-in seen-map [:time] #(- (now) %))))
+  (when (and nick server)
+    (when-let [seen-map (fetch-one :seen :where {:nick (.toLowerCase nick)
+                                                 :server server})]
+      (update-in seen-map [:time] #(- (now) %)))))
 
 (defn put-seen [{:keys [nick channel com]} doing]
   (tack-time nick (:server @com) channel doing))
